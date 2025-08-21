@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Personal Info Masker — Hackathon</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0f1724;
+      --card:#0b1220;
+      --accent:#06b6d4;
+      --muted:#94a3b8;
+      --glass: rgba(255,255,255,0.03);
+      --radius:14px;
+      --pad:16px;
+    }
+    html,body{height:100%; margin:0; font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+    body{background: linear-gradient(180deg,#071025 0%, #081426 50%, #06121a 100%); color:#e6eef6; display:flex; align-items:center; justify-content:center; padding:20px;}
+    .app{
+      width:100%;
+      max-width:1100px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-radius:var(--radius);
+      box-shadow: 0 10px 30px rgba(2,6,23,0.6);
+      padding:22px;
+      display:grid;
+      grid-template-columns: 420px 1fr;
+      gap:20px;
+      align-items:start;
+    }
+    .panel{
+      background:var(--card);
+      border-radius:12px;
+      padding:14px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+    }
+    h1{margin:0 0 8px 0; font-size:18px;}
+    p.lead{color:var(--muted); margin:0 0 12px 0; font-size:13px}
+    .upload{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      margin-bottom:12px;
+    }
+    input[type=file]{color:transparent;}
+    button, .btn{
+      background:linear-gradient(180deg,var(--accent),#00a5bd);
+      border:none; color:#021018; padding:10px 12px; border-radius:10px; font-weight:600; cursor:pointer;
+    }
+    .btn-ghost{
+      background:transparent; border:1px solid rgba(255,255,255,0.06); color:var(--muted); padding:8px 10px; border-radius:10px; cursor:pointer;
+    }
+    .canvas-wrap{
+      background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.02));
+      border-radius:12px;
+      padding:12px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      align-items:center;
+      justify-content:center;
+    }
+    #preview{
+      max-width:100%;
+      border-radius:8px;
+      background: #0b1220;
+      box-shadow: 0 6px 20px rgba(2,6,23,0.6);
+      display:block;
+    }
+    .log{
+      font-family:monospace;
+      font-size:12px;
+      color:var(--muted);
+      background:var(--glass);
+      border-radius:8px;
+      padding:8px;
+      max-height:160px;
+      overflow:auto;
+    }
+    .options{display:flex; flex-direction:column; gap:8px; margin-top:8px;}
+    label.option{display:flex; gap:8px; align-items:center;}
+    input[type=checkbox]{width:16px; height:16px;}
+    .controls{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+    .small{font-size:12px; color:var(--muted)}
+    .badge{font-size:11px; padding:6px 8px; border-radius:8px; background:rgba(255,255,255,0.02); color:var(--muted)}
+    footer.small{font-size:12px; color:var(--muted); margin-top:12px;}
+    @media (max-width:980px){
+      .app{grid-template-columns:1fr; padding:14px;}
+    }
+  </style>
+</head>
+<body>
+  <div class="app" role="application" aria-label="Personal info masking tool">
+    <div class="panel" aria-hidden="false">
+      <h1>Personal Info Masking Tool</h1>
+      <p class="lead">Upload a scanned ID image. The app uses OCR to find SSNs and names and masks them with black rectangles. Bonus: DOB/address detection available.</p>
+
+      <div class="upload">
+        <input id="file-in" type="file" accept="image/*" />
+        <button id="load-btn" class="btn">Load Image</button>
+        <button id="clear-btn" class="btn-ghost">Clear</button>
+      </div>
+
+      <div class="options">
+        <label class="option"><input type="checkbox" id="mask-ssn" checked /> Mask SSNs (regex)</label>
+        <label class="option"><input type="checkbox" id="mask-names" checked /> Mask Names (NER & heuristic)</label>
+        <label class="option"><input type="checkbox" id="mask-dob" /> Mask DOBs (dates)</label>
+        <label class="option"><input type="checkbox" id="mask-address" /> Mask Addresses (heuristic)</label>
+      </div>
+
+      <div class="controls">
+        <button id="process-btn" class="btn">Process & Mask</button>
+        <button id="download-btn" class="btn-ghost" disabled>Download Masked</button>
+        <button id="show-ocr-btn" class="btn-ghost" disabled>Show OCR Text</button>
+        <div style="flex:1"></div>
+        <div class="badge" id="status-badge">Idle</div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div class="log" id="log">Choose or drop an image, then press “Process & Mask”.</div>
+      </div>
+
+      <footer class="small">
+        Tips: For better results, use clear scans, English text, and 300dpi images. This demo is client-side — no upload to server.
+      </footer>
+    </div>
+
+    <div class="panel">
+      <div class="canvas-wrap">
+        <canvas id="preview" width="800" height="500" aria-label="Image preview"></canvas>
+        <div style="width:100%; display:flex; gap:8px; align-items:center;">
+          <div style="flex:1">
+            <div class="small">Progress</div>
+            <div id="progress" class="small">—</div>
+          </div>
+          <div style="width:180px; text-align:right;">
+            <div class="small">Detected items</div>
+            <div id="counts" class="small">Names: 0 &nbsp; SSNs: 0</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div id="ocr-text" class="log" style="display:none; white-space:pre-wrap;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tesseract.js CDN -->
+  <script src="https://unpkg.com/tesseract.js@2.1.5/dist/tesseract.min.js"></script>
+  <!-- compromise (light NER) -->
+  <script src="https://unpkg.com/compromise@13.11.3/builds/compromise.min.js"></script>
+
+  <script>
+  (function(){
+    // UI elements
+    const fileIn = document.getElementById('file-in');
+    const loadBtn = document.getElementById('load-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const processBtn = document.getElementById('process-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const showOcrBtn = document.getElementById('show-ocr-btn');
+
+    const maskSSN = document.getElementById('mask-ssn');
+    const maskNames = document.getElementById('mask-names');
+    const maskDOB = document.getElementById('mask-dob');
+    const maskAddress = document.getElementById('mask-address');
+
+    const preview = document.getElementById('preview');
+    const ctx = preview.getContext('2d');
+    const logEl = document.getElementById('log');
+    const progressEl = document.getElementById('progress');
+    const countsEl = document.getElementById('counts');
+    const statusBadge = document.getElementById('status-badge');
+    const ocrTextEl = document.getElementById('ocr-text');
+
+    let img = new Image();
+    let currentImageDataURL = '';
+    let lastRecognizeResult = null; // store OCR result
+
+    function log(...args){
+      const s = args.join(' ');
+      logEl.textContent = s + '\\n' + logEl.textContent;
+      console.log(...args);
+    }
+
+    function setStatus(s){
+      statusBadge.textContent = s;
+    }
+
+    // Load from file input
+    loadBtn.addEventListener('click', ()=> fileIn.click());
+    fileIn.addEventListener('change', async (e)=>{
+      if(!fileIn.files || fileIn.files.length===0) return;
+      const f = fileIn.files[0];
+      loadImageFile(f);
+    });
+
+    clearBtn.addEventListener('click', ()=>{
+      ctx.clearRect(0,0,preview.width,preview.height);
+      currentImageDataURL = '';
+      lastRecognizeResult = null;
+      downloadBtn.disabled = true;
+      showOcrBtn.disabled = true;
+      ocrTextEl.style.display='none';
+      setStatus('Idle');
+      log('Cleared.');
+    });
+
+    // Drag & drop support
+    preview.addEventListener('dragover', e => { e.preventDefault(); preview.style.opacity=0.8; });
+    preview.addEventListener('dragleave', e => { preview.style.opacity=1; });
+    preview.addEventListener('drop', e => {
+      e.preventDefault();
+      preview.style.opacity=1;
+      const f = e.dataTransfer.files && e.dataTransfer.files[0];
+      if(f) loadImageFile(f);
+    });
+
+    function loadImageFile(file){
+      const reader = new FileReader();
+      reader.onload = function(evt){
+        img = new Image();
+        img.onload = function(){
+          drawImageToCanvas(img);
+          currentImageDataURL = preview.toDataURL('image/png');
+          setStatus('Image loaded');
+          log('Loaded image:', file.name, (${img.width}×${img.height}));
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function drawImageToCanvas(image){
+      // Resize canvas to image aspect ratio but fit into available area (max 1000x800)
+      const maxW = 1000, maxH = 800;
+      let w = image.width, h = image.height;
+      const ratio = Math.min(maxW / w, maxH / h, 1);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+      preview.width = w;
+      preview.height = h;
+      ctx.clearRect(0,0,w,h);
+      ctx.drawImage(image, 0, 0, w, h);
+    }
+
+    // OCR + processing
+    processBtn.addEventListener('click', async ()=>{
+      if(!currentImageDataURL && !img.src){ log('No image loaded.'); return; }
+      setStatus('Running OCR...');
+      lastRecognizeResult = null;
+      ocrTextEl.style.display='none';
+      downloadBtn.disabled = true;
+      showOcrBtn.disabled = true;
+
+      // Use Tesseract
+      try{
+        progressEl.textContent = 'Starting OCR...';
+        log('Starting OCR...');
+        const worker = Tesseract.createWorker({
+          logger: m => {
+            // m looks like { status: 'recognizing text', progress: 0.6 }
+            if(m.status && m.progress !== undefined){
+              const p = Math.round(m.progress * 100);
+              progressEl.textContent = ${m.status} — ${p}%;
+            } else if(m.status) {
+              progressEl.textContent = m.status;
+            }
+          }
+        });
+        await worker.load();
+        await worker.loadLanguage('eng');
+        await worker.initialize('eng');
+
+        // convert canvas to blob for better performance / scale handling
+        const blob = await (await fetch(preview.toDataURL('image/png'))).blob();
+
+        const { data } = await worker.recognize(blob);
+        lastRecognizeResult = data;
+        await worker.terminate();
+
+        progressEl.textContent = 'OCR complete';
+        setStatus('OCR complete');
+        log('OCR complete: confidence', Math.round(data.confidence || 0));
+        showOcrBtn.disabled = false;
+
+        // Show raw text if user wants
+        // ocrTextEl.textContent = data.text;
+        // ocrTextEl.style.display='block';
+
+        // Now detect SSNs and names and mask
+        await doMasking(data);
+      }catch(err){
+        console.error(err);
+        log('Error during OCR:', err.message || err);
+        setStatus('Error');
+      }
+    });
+
+    showOcrBtn.addEventListener('click', ()=>{
+      if(!lastRecognizeResult) return;
+      if(ocrTextEl.style.display==='none'){
+        ocrTextEl.style.display='block';
+        ocrTextEl.textContent = lastRecognizeResult.text;
+        showOcrBtn.textContent = 'Hide OCR Text';
+      } else {
+        ocrTextEl.style.display='none';
+        showOcrBtn.textContent = 'Show OCR Text';
+      }
+    });
+
+    downloadBtn.addEventListener('click', ()=>{
+      const link = document.createElement('a');
+      link.download = 'masked.png';
+      link.href = preview.toDataURL('image/png');
+      link.click();
+    });
+
+    // Utility: normalize a word for comparison
+    function normWord(s){
+      return s.replace(/[^a-zA-Z0-9]/g,'').toLowerCase();
+    }
+
+    function getWordBBox(word){
+      // Tesseract word object shapes vary by version.
+      // Try common properties.
+      // If word.bbox has x0,y0,x1,y1 use that
+      if(word.bbox && ('x0' in word.bbox || 'x1' in word.bbox)){
+        const x0 = word.bbox.x0 ?? word.bbox.x1 ?? 0;
+        const y0 = word.bbox.y0 ?? 0;
+        const x1 = word.bbox.x1 ?? (word.bbox.x0 + (word.bbox.w || 0)) ?? 0;
+        const y1 = word.bbox.y1 ?? (word.bbox.y0 + (word.bbox.h || 0)) ?? 0;
+        return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      }
+      // some versions use x, y, w, h
+      if('x' in word && 'y' in word && 'w' in word && 'h' in word){
+        return { x: word.x, y: word.y, w: word.w, h: word.h };
+      }
+      // fallback: use baseline / confidence coords if present
+      if(word.bbox && ('x' in word.bbox && 'y' in word.bbox && 'w' in word.bbox && 'h' in word.bbox)){
+        return { x: word.bbox.x, y: word.bbox.y, w: word.bbox.w, h: word.bbox.h };
+      }
+      // If none, return null
+      return null;
+    }
+
+    // Find a sequence of targetWords within array words (matching normalized forms)
+    function findSequence(wordsArr, targetWordsArr){
+      const targetNorm = targetWordsArr.map(t=>normWord(t));
+      for(let i=0;i<wordsArr.length;i++){
+        let matched = true;
+        for(let j=0;j<targetNorm.length;j++){
+          if(i+j >= wordsArr.length){ matched=false; break; }
+          const wnorm = normWord(wordsArr[i+j].text || '');
+          if(wnorm !== targetNorm[j]) { matched=false; break; }
+        }
+        if(matched){
+          return { start:i, end:i+targetNorm.length-1 };
+        }
+      }
+      return null;
+    }
+
+    // Heuristic: name detection fallback
+    function heuristicFindNamesFromWords(wordsArr){
+      // Approach: look for 1-3 consecutive words that start with uppercase letter and are longer than 1
+      const names = [];
+      for(let i=0;i<wordsArr.length;i++){
+        const w = wordsArr[i].text || '';
+        if(/^[A-Z][a-z]{1,}$/.test(w)){
+          // try 3-word window, then 2, then 1
+          for(let len=3; len>=1; len--){
+            if(i+len-1 >= wordsArr.length) continue;
+            let ok=true;
+            let pieces = [];
+            for(let k=0;k<len;k++){
+              const t = wordsArr[i+k].text || '';
+              pieces.push(t);
+              if(!/^[A-Z][a-z]{1,}$/.test(t)) { ok=false; break; }
+            }
+            if(ok){
+              names.push(pieces.join(' '));
+              // skip forward to avoid duplicates
+              i += len-1;
+              break;
+            }
+          }
+        }
+      }
+      // dedupe
+      return [...new Set(names)];
+    }
+
+    async function doMasking(ocrData){
+      if(!ocrData) return;
+      setStatus('Detecting sensitive items...');
+      log('Processing OCR data for masking...');
+      const words = ocrData.words || [];
+      // Build a wordsArr with text and bbox scaled to canvas size
+      // Note: tesseract coordinates are relative to the image as provided. If canvas was scaled, scale accordingly.
+      // We used the canvas image drawn from the original image resized to fit preview.size. Tesseract recognized the blob derived from canvas, so coords align to canvas dims.
+      const wordsArr = words.map(w => ({
+        text: w.text,
+        conf: w.confidence || w.conf,
+        bbox: getWordBBox(w)
+      })).filter(w => !!w.bbox && (w.text && w.text.trim().length>0));
+
+      // Quick maps
+      const plainText = ocrData.text || '';
+      log('Raw OCR text length:', plainText.length);
+      // Reset overlay to original image
+      drawImageToCanvas(img);
+
+      // We'll collect rectangles to mask
+      const rectangles = [];
+      let ssnCount = 0, nameCount = 0, dobCount = 0, addrCount = 0;
+
+      // SSN detection using regex on whole text and then mapping into words
+      if(maskSSN.checked){
+        // Recognize patterns like 123-45-6789 or 123456789
+        const ssnRegexGlobal = /(?:\b|[^0-9])((\d{3}-\d{2}-\d{4})|(\d{9}))(?:\b|[^0-9])/g;
+        let m;
+        const foundSSNs = [];
+        while((m = ssnRegexGlobal.exec(' ' + plainText + ' ')) !== null){
+          const match = m[1];
+          foundSSNs.push(match);
+        }
+        // For each found SSN, try to find sequence in words
+        for(const ssn of foundSSNs){
+          const cleaned = ssn.replace(/[^0-9]/g,'');
+          // Try match as three words pattern (e.g., 123-45-6789 might be tokenized)
+          // build target words: try with hyphens, then split into groups
+          const candidateForms = [ssn, cleaned, ssn.replace(/-/g,' '), ssn.replace(/-/g,'')];
+          let masked = false;
+          for(const form of candidateForms){
+            const targetWords = form.split(/\s+/).filter(Boolean);
+            const seq = findSequence(wordsArr, targetWords);
+            if(seq){
+              // Build bounding rect for wordsArr[seq.start..seq.end]
+              const rect = boundingRectForWords(wordsArr, seq.start, seq.end);
+              rectangles.push(rect);
+              ssnCount++;
+              masked=true;
+              break;
+            }
+          }
+          if(!masked){
+            // fallback: search for a digit-heavy token anywhere
+            for(let i=0;i<wordsArr.length;i++){
+              if((wordsArr[i].text || '').replace(/[^0-9]/g,'').length >= 9){
+                const rect = wordsArr[i].bbox;
+                rectangles.push(rect);
+                ssnCount++;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // DOB detection (dates) like MM/DD/YYYY or DD/MM/YYYY or YYYY-MM-DD
+      if(maskDOB.checked){
+        const dateRegex = /(0?[1-9]|1[0-2])[-\/](0?[1-9]|[12]\d|3[01])[-\/](19|20)\d{2}|\b(19|20)\d{2}[-\/](0?[1-9]|1[0-2])[-\/](0?[1-9]|[12]\d|3[01])\b/g;
+        const found = [];
+        let mm;
+        while((mm = dateRegex.exec(plainText)) !== null){
+          found.push(mm[0]);
+        }
+        for(const dt of found){
+          const targetWords = dt.split(/\s+/);
+          const seq = findSequence(wordsArr, targetWords);
+          if(seq){
+            rectangles.push(boundingRectForWords(wordsArr, seq.start, seq.end));
+            dobCount++;
+          } else {
+            // fallback: find token with lots of digits and slashes
+            for(let i=0;i<wordsArr.length;i++){
+              if(/[0-9]{2}[-\/][0-9]{2}[-\/][0-9]{4}/.test(wordsArr[i].text || '')){
+                rectangles.push(wordsArr[i].bbox);
+                dobCount++;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Address heuristic (very rough): lines containing keywords like 'Street', 'St.', 'Apt', 'Road', 'Rd', 'Lane', 'Ln', 'Ave', digits followed by street words
+      if(maskAddress.checked){
+        const addrKeywords = ['street','st','road','rd','avenue','ave','lane','ln','drive','dr','apt','apartment','suite','blvd','boulevard','floor','fl'];
+        // Split OCR text by lines
+        const lines = (plainText || '').split(/\\n+/);
+        for(const line of lines){
+          const lower = line.toLowerCase();
+          if(addrKeywords.some(k => lower.includes(k))){
+            // try find which words match this line
+            const lineWords = line.split(/\\s+/).filter(Boolean);
+            const seq = findSequence(wordsArr, lineWords);
+            if(seq){
+              rectangles.push(boundingRectForWords(wordsArr, seq.start, seq.end));
+              addrCount++;
+            } else {
+              // try search for any keyword words inside wordsArr
+              for(let i=0;i<wordsArr.length;i++){
+                if(addrKeywords.some(k => (wordsArr[i].text || '').toLowerCase().includes(k))){
+                  rectangles.push(wordsArr[i].bbox);
+                  addrCount++;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Name detection: first attempt using compromise NER
+      if(maskNames.checked){
+        let nameCandidates = [];
+        try{
+          // compromise NER on full text - returns people nouns
+          const doc = window.nlp(plainText || '');
+          const people = doc.people().out('array') || [];
+          // compromise sometimes returns labels like "MR JOHN DOE", so trim
+          nameCandidates = nameCandidates.concat(people.map(s=>s.trim()).filter(Boolean));
+        }catch(e){
+          console.warn('compromise failed', e);
+        }
+
+        // If compromise found none, fallback to heuristic
+        if(nameCandidates.length === 0){
+          nameCandidates = heuristicFindNamesFromWords(wordsArr);
+        }
+
+        // For each candidate, try to map to words and get bbox
+        const usedNameSpans = [];
+        for(const cand of nameCandidates){
+          const candWords = (cand || '').split(/\s+/).filter(Boolean);
+          if(candWords.length===0) continue;
+          const seq = findSequence(wordsArr, candWords);
+          if(seq){
+            rectangles.push(boundingRectForWords(wordsArr, seq.start, seq.end));
+            nameCount++;
+            usedNameSpans.push({cand, seq});
+          } else {
+            // if multiword name not matched, try match any single word within cand
+            for(const sub of candWords){
+              const seq2 = findSequence(wordsArr, [sub]);
+              if(seq2){
+                rectangles.push(boundingRectForWords(wordsArr, seq2.start, seq2.end));
+                nameCount++;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Draw black rectangles on canvas
+      // Use canvas coordinate mapping directly from bbox
+      ctx.save();
+      ctx.fillStyle = '#000';
+      for(const r of rectangles){
+        // Expand a little to ensure full cover
+        const pad = Math.max(2, Math.round(Math.min(r.w, r.h) * 0.12));
+        ctx.fillRect(r.x - pad, r.y - pad, r.w + pad*2, r.h + pad*2);
+      }
+      ctx.restore();
+
+      countsEl.textContent = Names: ${nameCount}  SSNs: ${ssnCount}  DOBs: ${dobCount}  Addr: ${addrCount};
+      setStatus('Masked');
+      downloadBtn.disabled = false;
+      log('Masking complete —', ${rectangles.length} boxes drawn.);
+    }
+
+    function boundingRectForWords(wordsArr, start, end){
+      // compute bounding box that encloses wordsArr[start..end]
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for(let i=start;i<=end;i++){
+        const b = wordsArr[i].bbox;
+        if(!b) continue;
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + b.w);
+        maxY = Math.max(maxY, b.y + b.h);
+      }
+      if(!isFinite(minX)) return { x:0,y:0,w:0,h:0 };
+      return { x: Math.round(minX), y: Math.round(minY), w: Math.round(maxX - minX), h: Math.round(maxY - minY) };
+    }
+
+    // Initial demo image (optional) - small placeholder drawing so the canvas isn't empty
+    (function drawPlaceholder(){
+      preview.width = 800; preview.height = 480;
+      ctx.fillStyle = '#071226'; ctx.fillRect(0,0,preview.width, preview.height);
+      ctx.fillStyle = '#0b2340'; ctx.fillRect(12,30,360,240);
+      ctx.fillStyle = '#9fdce7'; ctx.font = '18px Inter, Arial'; ctx.fillText('Drop an ID image here or click Load', 20, 300);
+    })();
+
+  })();
+  </script>
+</body>
+</html>
